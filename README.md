@@ -2,7 +2,7 @@
 
 A lightweight HTTP API service for remote Anki card creation and management.
 
-Designed to sit between external callers (e.g. Discord bots, CLI tools) and a per-user Anki Desktop instance, handling deduplication, upsert logic, and template management on top of AnkiConnect.
+Sits between any HTTP caller and a per-user Anki Desktop instance, handling deduplication, upsert logic, and template management on top of AnkiConnect.
 
 ## What it does
 
@@ -14,18 +14,16 @@ Designed to sit between external callers (e.g. Discord bots, CLI tools) and a pe
 ## Architecture
 
 ```
-Discord skill (or any HTTP caller)
-        ↓
-  Binding DB / Registry
-        ↓
-  anki-remote-api  ← this project
-        ↓
-   AnkiConnect
-        ↓
-  Anki Desktop
+HTTP client
+     ↓
+anki-remote-api  ← this project
+     ↓
+AnkiConnect
+     ↓
+Anki Desktop
 ```
 
-Each user gets an isolated container with its own Anki profile, media directory, and API token.
+Each user gets an isolated container with its own Anki profile, media directory, and API token. A binding registry maps external user identifiers to their respective service instances.
 
 ## Tech stack
 
