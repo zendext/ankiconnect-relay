@@ -17,10 +17,23 @@ RUN go mod tidy
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/ankiconnect-relay ./cmd/server
 
 FROM debian:bookworm-slim
+
+ARG HTTP_PROXY="http://192.168.50.1:23456"
+ARG HTTPS_PROXY="http://192.168.50.1:23456"
+ARG NO_PROXY="localhost,127.0.0.1,::1"
+ENV HTTP_PROXY=${HTTP_PROXY} \
+    HTTPS_PROXY=${HTTPS_PROXY} \
+    http_proxy=${HTTP_PROXY} \
+    https_proxy=${HTTPS_PROXY} \
+    NO_PROXY=${NO_PROXY} \
+    no_proxy=${NO_PROXY}
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy NO_PROXY no_proxy
+
 WORKDIR /app
 COPY --from=build /out/ankiconnect-relay /usr/local/bin/ankiconnect-relay
 ENV LISTEN_ADDR=:8080 \
