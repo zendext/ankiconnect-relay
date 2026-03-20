@@ -7,369 +7,93 @@
 Build a v0 remote card creation system for Anki that supports:
 
 - Receiving structured flashcard data from external callers (Discord skill, CLI, etc.)
-- Routing per user to the correct Anki container
-- Writing cards via `API service → AnkiConnect → Anki Desktop`
-- Managing decks, business templates, and note lifecycle (lookup / create / update / upsert)
+- Routing requests to an Anki Desktop runtime that lives inside Docker
+- Writing cards via `bridge API -> AnkiConnect -> Anki Desktop`
+- Reporting whether manual intervention is currently required
 
 ### In scope for v0
 
-- One container = one Anki user
-- Multi-user supported by running multiple containers
-- Discord skill maintains `discord_user_id → anki_user/container` binding in a shared DB
-- Uses AnkiConnect addon — no custom addon
-- Media: accept external URLs only; no TTS generation
-- Business template/schema managed by this service, not by AnkiConnect
+- Single-user validated first; multi-user by running multiple isolated stacks
+- Non-root Anki Desktop container with in-container virtual desktop (VNC/noVNC)
+- First bridge API for runtime probing and basic AnkiConnect passthrough
+- Manual first-run GUI setup is acceptable in v0
+- AnkiConnect installed manually inside the desktop runtime is acceptable in v0
 
 ### Out of scope for v0
 
+- Full automation of every first-run GUI interaction
 - Single-instance multi-tenancy
 - Custom Anki addon development
 - Complex template migration
-- Auto-scaling or orchestration
-- Advanced permission system
-- TTS generation
+- Production orchestration / scheduler / autoscaling
 
 ---
 
 ## 2. Architecture
 
-```
-Discord skill (or any HTTP caller)
-        ↓
-  Binding DB / Registry
-        ↓
-  anki-remote-api (per-user container)
-        ↓
-   AnkiConnect
-        ↓
-  Anki Desktop
+```text
+HTTP caller
+    ↓
+anki-remote-api bridge
+    ↓
+AnkiConnect (inside desktop container)
+    ↓
+Anki Desktop
 ```
 
-### Component responsibilities
-
-| Component | Responsibilities |
-|-----------|-----------------|
-| Discord skill | Resolve `discord_user_id` → look up binding → build card payload → call `/v0/notes/upsert` |
-| Binding DB | Store `discord_user_id → service_base_url + token + status` |
-| anki-remote-api | Deck API, template API, lookup/upsert, dedup, merge rules, call AnkiConnect |
-| AnkiConnect | Deck list/create, note create/find/update, model/field queries |
-| Anki Desktop | Hold the user's isolated collection; final card storage |
+The bridge is responsible for reporting runtime readiness and proxying safe AnkiConnect operations.
+The desktop runtime is responsible for running the actual Anki GUI environment.
 
 ---
 
-## 3. Container design
+## 3. Runtime model
 
-Each user runs one container. Minimum contents:
+The validated runtime model is:
 
-1. **Anki Desktop** — isolated profile + data directory mount
-2. **AnkiConnect addon** — exposes local HTTP to the API service
-3. **anki-remote-api** — the service in this repo
-4. **Local storage** — template registry (SQLite or PostgreSQL), service config
+- Anki Desktop in Docker
+- non-root user (`uid=1000`, `gid=1000`)
+- TigerVNC + openbox + noVNC
+- persistent bind mounts for:
+  - `/anki-data`
+  - `/home/anki/.local/share/AnkiProgramFiles`
+  - `/home/anki/.cache/uv`
 
-### Isolation per container
+The container uses a single runtime model:
 
-- Anki collection / profile
-- Media directory
-- Config files
-- API token
-- Deck / model state
+- if the launcher-installed runtime is missing, it starts launcher bootstrap
+- if the installed runtime exists, it starts the real Anki binary
+- the virtual desktop stays available even if Anki exits, so manual GUI recovery remains possible
 
----
-
-## 4. Data models
-
-### 4.1 Binding DB
-
-Table: `anki_user_bindings`
-
-| Column | Type | Notes |
-|--------|------|-------|
-| `discord_user_id` | string, unique | Discord user ID |
-| `anki_user_id` | string | Internal Anki user identifier |
-| `service_base_url` | string | URL of this service instance |
-| `service_token` | string | Bearer token |
-| `status` | string | `active \| disabled \| pending` |
-| `created_at` | timestamp | |
-| `updated_at` | timestamp | |
-
-Optional extensions: `default_template_id`, `default_deck`, `notes`.
-
-### 4.2 Business template
-
-Managed by this service; not tied to the AnkiConnect model layer.
-
-Fields:
-
-| Field | Description |
-|-------|-------------|
-| `id` | Template identifier (e.g. `vocab-basic`) |
-| `version` | Schema version |
-| `name` | Display name |
-| `description` | |
-| `defaults.deck` | Default deck name |
-| `defaults.tags` | Default tags |
-| `dedupe.by` | Dedup key — always `canonical_term` for v0 |
-| `schema` | JSON Schema for the note payload |
-| `mapping.anki_model` | Target Anki model name |
-| `mapping.field_map` | Payload field → Anki field mapping |
-| `render_rules` | How to render `meanings` / `examples` to HTML |
-
-### 4.3 Note payload — vocab-basic (v0 primary template)
-
-```json
-{
-  "term": "abate",
-  "term_type": "word",
-  "phonetic": "/əˈbeɪt/",
-  "meanings": [
-    {
-      "pos": "verb",
-      "gloss_zh": "减轻；减弱",
-      "gloss_en": "to become less strong"
-    }
-  ],
-  "examples": [
-    {
-      "text": "The storm suddenly abated.",
-      "translation": "The storm suddenly weakened."
-    }
-  ],
-  "audio_url": "https://example.com/abate.mp3",
-  "tags": ["discord", "vocab"],
-  "source": {
-    "app": "discord",
-    "channel_id": "1480800595735482411"
-  }
-}
-```
-
-### 4.4 canonical_term normalization
-
-Rules applied in order:
-
-1. Trim leading/trailing whitespace
-2. Lowercase
-3. Collapse internal whitespace to single space
-
-Examples: `Abate`, ` abate `, `ABATE` → `abate`
+This avoids splitting GUI lifecycle concerns into multiple externally visible container modes.
 
 ---
 
-## 5. API design
+## 4. Bridge API (current v0 slice)
 
-### 5.1 Health
+Currently implemented / being stabilized:
 
-```
-GET /health
-```
+- `GET /health`
+- `GET /status`
+- `POST /anki/version`
+- `POST /anki/deck-names`
 
-Returns status of: service, AnkiConnect, Anki Desktop.
+### `/status` goals
 
-```json
-{
-  "service": "ok",
-  "ankiconnect": "ok",
-  "anki": "ok"
-}
-```
+The bridge should expose enough state for orchestration to tell whether the runtime is usable.
 
----
+Current state signals:
 
-### 5.2 Deck API
-
-```
-GET  /v0/decks
-POST /v0/decks
-POST /v0/decks/ensure
-```
-
-#### POST /v0/decks/ensure
-
-Request:
-```json
-{ "name": "English::Words" }
-```
-
-Response:
-```json
-{
-  "exists": true,
-  "created": false,
-  "deck": { "name": "English::Words" }
-}
-```
+- whether program files are installed
+- whether AnkiConnect answers
+- whether manual intervention is likely still required
+- recent startup log tail
 
 ---
 
-### 5.3 Template API
+## 5. Near-term roadmap
 
-```
-GET   /v0/templates
-GET   /v0/templates/{template_id}
-POST  /v0/templates
-PATCH /v0/templates/{template_id}
-POST  /v0/templates/{template_id}/render-preview  (optional)
-```
-
----
-
-### 5.4 Note API
-
-#### POST /v0/notes/lookup
-
-Dedup check by `template_id + deck + canonical_term`.
-
-Request:
-```json
-{
-  "template_id": "vocab-basic",
-  "deck": "English::Words",
-  "term": "abate"
-}
-```
-
-Response:
-```json
-{
-  "found": true,
-  "note_id": "1712345678901",
-  "fields": { "term": "abate" }
-}
-```
-
-#### POST /v0/notes
-
-Create a new note.
-
-#### PATCH /v0/notes/{note_id}
-
-Update a note. Supports two modes: `replace` and `merge`.
-
-#### POST /v0/notes/upsert
-
-Primary endpoint for external callers.
-
-Request:
-```json
-{
-  "template_id": "vocab-basic",
-  "deck": "English::Words",
-  "update_mode": "merge",
-  "note": { ... }
-}
-```
-
-Response (created):
-```json
-{ "action": "created", "note_id": "1712345678901" }
-```
-
-Response (updated):
-```json
-{
-  "action": "updated",
-  "note_id": "1712345678901",
-  "updated_fields": ["meanings", "examples"]
-}
-```
-
----
-
-## 6. Merge / update rules
-
-| Field | Strategy | Rule |
-|-------|----------|------|
-| `meanings` | merge | Deduplicate by `pos + gloss_zh + gloss_en` |
-| `examples` | merge | Deduplicate by `text + translation` |
-| `tags` | merge | Set union |
-| `audio_url` | replace | Always overwrite |
-| `phonetic` | replace | Non-empty new value overwrites; empty new value is ignored |
-
----
-
-## 7. AnkiConnect boundary
-
-| Layer | Handles |
-|-------|---------|
-| AnkiConnect | Deck list/create, note create/find/update, tags, model/field queries |
-| anki-remote-api | Business templates, dedup, canonical_term, merge rules, render rules, upsert semantics |
-
----
-
-## 8. Skill call flow
-
-1. Skill resolves `discord_user_id`
-2. Skill queries Binding DB → gets `service_base_url` + `service_token`
-3. Skill builds structured note payload
-4. Skill calls `POST /v0/notes/upsert` on the target container
-5. Service returns `created` or `updated`
-6. Skill reports result to user
-
----
-
-## 9. Tech stack
-
-| Component | Choice | Reason |
-|-----------|--------|--------|
-| Language | Go | Single binary, clean container image, strong typing |
-| HTTP framework | Gin | Lightweight, idiomatic |
-| DB layer | `database/sql` with pluggable drivers | Driver selected from `DATABASE_URL` scheme |
-| SQLite driver | `modernc.org/sqlite` | Pure Go, no CGO required |
-| PostgreSQL driver | `pgx` | Production use |
-| Storage | SQLite (open-source/local) or PostgreSQL (production) | |
-| Internal comms | AnkiConnect via `net/http` | Standard library, no extra deps |
-
-### DATABASE_URL scheme routing
-
-| Scheme | Driver |
-|--------|--------|
-| `sqlite://` | `modernc.org/sqlite` |
-| `postgres://` or `postgresql://` | `pgx` |
-
-SQL is written to be compatible with both dialects. PG-specific features (e.g. JSON operators) are avoided in the core query paths.
-
----
-
-## 10. Security
-
-- AnkiConnect is **not** exposed outside the container
-- External callers only reach the API service
-- Each container has an independent Bearer token
-- API service listens on a controlled network interface only
-
----
-
-## 11. Phased implementation plan
-
-### Phase 1 — Core execution path
-- Single-user container with Anki + AnkiConnect running
-- API service: `/health`, deck list/create, note create/find/update
-
-### Phase 2 — Business template layer
-- Define `vocab-basic` template
-- Template CRUD
-- Render rules
-- `canonical_term` normalization
-
-### Phase 3 — Upsert
-- `lookup` implementation
-- Merge / update rules
-- `POST /v0/notes/upsert`
-
-### Phase 4 — Discord skill integration
-- Binding DB schema and query interface
-- Skill routing by `discord_user_id`
-- Return created/updated result to user
-
-### Phase 5 — Multi-user prep
-- Standardize container image and env vars
-- Support multiple instances
-
----
-
-## 12. Recommended build order
-
-1. Single-user container + API service + AnkiConnect connectivity
-2. Lock down `vocab-basic` template
-3. Implement `/v0/notes/upsert`
-4. Wire up Discord skill + Binding DB
+1. Stabilize bridge runtime probing
+2. Add auth / token gate to bridge API
+3. Add generic AnkiConnect passthrough or selected safe actions
+4. Add deck ensure helpers
+5. Add note create / lookup / update / upsert logic

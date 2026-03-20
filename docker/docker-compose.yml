@@ -1,24 +1,25 @@
-# docker-compose.yml — single-user Anki + anki-remote-api stack
+# docker/docker-compose.yml
+# Single-user stack for local development and runtime validation.
 #
-# Required env vars (set in .env or environment):
-#   ANKI_SYNC_HKEY   — AnkiWeb sync token (obtain via: go run ./cmd/ankiauth)
-#   API_TOKEN        — Bearer token for anki-remote-api
-#   DATABASE_URL     — e.g. sqlite:///data/app.db or postgres://...
+# Host bind-mount directories MUST be created in advance and owned by 1000:1000.
+# Do not rely on Docker auto-creating them for the non-root desktop container.
 
 services:
   anki:
-    build:
-      context: ./anki
-      dockerfile: Dockerfile
+    image: anki-remote-api-anki:latest-vnc
     restart: unless-stopped
     environment:
-      ANKI_SYNC_HKEY: ${ANKI_SYNC_HKEY}
       ANKI_PROFILE: "User 1"
-      ANKICONNECT_URL: "http://localhost:8765"
+      VNC_PASSWORD: ${VNC_PASSWORD:-12345678}
+      WAIT_FOR_ANKICONNECT: "0"
+      KEEP_DESKTOP_ALIVE: "1"
+    ports:
+      - "${VNC_PORT:-5901}:5901"
+      - "${NOVNC_PORT:-6080}:6080"
     volumes:
-      - anki-data:/anki-data
-    # AnkiConnect is NOT exposed to the host — only reachable by the api service
-    # within the same compose network.
+      - ${ANKI_DATA_DIR:-./.data/anki-data}:/anki-data
+      - ${ANKI_PROGRAM_FILES_DIR:-./.data/program-files}:/home/anki/.local/share/AnkiProgramFiles
+      - ${ANKI_UV_CACHE_DIR:-./.data/uv-cache}:/home/anki/.cache/uv
     expose:
       - "8765"
 
@@ -26,19 +27,20 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-http://192.168.50.1:23456}
+        HTTPS_PROXY: ${HTTPS_PROXY:-http://192.168.50.1:23456}
+        NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,::1}
     restart: unless-stopped
     ports:
       - "${LISTEN_PORT:-8080}:8080"
     environment:
-      ANKICONNECT_URL: "http://anki:8765"
-      DATABASE_URL: ${DATABASE_URL:-sqlite:///data/app.db}
-      API_TOKEN: ${API_TOKEN}
       LISTEN_ADDR: ":8080"
+      ANKICONNECT_URL: "http://anki:8765"
+      ANKI_BASE: "/anki-data"
+      ANKI_PROGRAM_FILES_DIR: "/home/anki/.local/share/AnkiProgramFiles"
     volumes:
-      - api-data:/data
+      - ${ANKI_DATA_DIR:-./.data/anki-data}:/anki-data:ro
+      - ${ANKI_PROGRAM_FILES_DIR:-./.data/program-files}:/home/anki/.local/share/AnkiProgramFiles:ro
     depends_on:
       - anki
-
-volumes:
-  anki-data:
-  api-data:
