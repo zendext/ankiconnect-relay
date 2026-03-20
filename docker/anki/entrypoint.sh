@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ANKI_MODE="${ANKI_MODE:-bootstrap}"
 ANKI_BASE="${ANKI_BASE:-/anki-data}"
 PROFILE="${ANKI_PROFILE:-User 1}"
 DISPLAY="${DISPLAY:-:1}"
@@ -10,13 +9,13 @@ ANKI_HOME="/home/anki"
 ANKI_USER="anki"
 REAL_ANKI="${ANKI_HOME}/.local/share/AnkiProgramFiles/.venv/bin/anki"
 LAUNCHER_ANKI="/usr/local/bin/anki"
-WAIT_FOR_ANKICONNECT="${WAIT_FOR_ANKICONNECT:-1}"
+WAIT_FOR_ANKICONNECT="${WAIT_FOR_ANKICONNECT:-0}"
+KEEP_DESKTOP_ALIVE="${KEEP_DESKTOP_ALIVE:-1}"
 VNC_PORT="${VNC_PORT:-5901}"
 NOVNC_PORT="${NOVNC_PORT:-6080}"
 VNC_GEOMETRY="${VNC_GEOMETRY:-1440x900}"
 VNC_DEPTH="${VNC_DEPTH:-24}"
 VNC_PASSWORD="${VNC_PASSWORD:-}"
-BOOTSTRAP_KEEPALIVE="${BOOTSTRAP_KEEPALIVE:-1}"
 
 export DISPLAY XDG_RUNTIME_DIR QTWEBENGINE_DISABLE_SANDBOX QTWEBENGINE_CHROMIUM_FLAGS QT_DEBUG_PLUGINS ANKI_NOHIGHDPI HOME="${ANKI_HOME}"
 mkdir -p "${XDG_RUNTIME_DIR}" "${ANKI_BASE}" "${ANKI_HOME}/.cache/uv" "${ANKI_HOME}/.local/share/AnkiProgramFiles" "${ANKI_HOME}/.local/share/Anki2"
@@ -64,86 +63,54 @@ echo "[entrypoint] starting noVNC on :${NOVNC_PORT} -> localhost:${VNC_PORT}"
 websockify --web=/usr/share/novnc/ ${NOVNC_PORT} 127.0.0.1:${VNC_PORT} > >(sed 's/^/[novnc] /') 2> >(sed 's/^/[novnc][stderr] /' >&2) &
 NOVNC_PID=$!
 
-# 2. Start Anki
+# 2. Start Anki or launcher
 ANKI_LOG="${ANKI_BASE}/anki-startup.log"
 run_as_anki "rm -f $(shell_quote "${ANKI_LOG}") && touch $(shell_quote "${ANKI_LOG}")"
-
-case "${ANKI_MODE}" in
-  bootstrap)
-    echo "[entrypoint] mode=bootstrap"
-    if [[ -x "${REAL_ANKI}" ]]; then
-        echo "[entrypoint] using installed venv Anki: ${REAL_ANKI}"
-        START_CMD="export DISPLAY='${DISPLAY}' XDG_RUNTIME_DIR='${XDG_RUNTIME_DIR}' HOME='${ANKI_HOME}' PYTHONFAULTHANDLER='${PYTHONFAULTHANDLER:-1}' RUST_BACKTRACE='${RUST_BACKTRACE:-1}' RUST_LOG='${RUST_LOG:-debug}'; exec '${REAL_ANKI}' --base '${ANKI_BASE}' --profile '${PROFILE}'"
-    else
-        echo "[entrypoint] using launcher bootstrap: ${LAUNCHER_ANKI}"
-        START_CMD="export DISPLAY='${DISPLAY}' XDG_RUNTIME_DIR='${XDG_RUNTIME_DIR}' HOME='${ANKI_HOME}' PYTHONFAULTHANDLER='${PYTHONFAULTHANDLER:-1}' RUST_BACKTRACE='${RUST_BACKTRACE:-1}' RUST_LOG='${RUST_LOG:-debug}'; exec '${LAUNCHER_ANKI}' --base '${ANKI_BASE}' --profile '${PROFILE}'"
-    fi
-    (
-        run_as_anki "${START_CMD}"
-    ) > >(sed 's/^/[anki] /' | tee -a "${ANKI_LOG}") \
-      2> >(sed 's/^/[anki][stderr] /' | tee -a "${ANKI_LOG}" >&2) &
-    ANKI_PID=$!
-    echo "[entrypoint] bootstrap desktop ready"
-    echo "[entrypoint] noVNC URL: http://localhost:${NOVNC_PORT}/vnc.html"
-    if [[ "${BOOTSTRAP_KEEPALIVE}" = "1" ]]; then
-        wait "${ANKI_PID}" || true
-        echo "[entrypoint] bootstrap process exited; keeping desktop alive for manual work"
-        while true; do sleep 3600; done
-    else
-        wait "${ANKI_PID}"
-    fi
-    ;;
-  run)
-    echo "[entrypoint] mode=run"
-    if [[ ! -x "${REAL_ANKI}" ]]; then
-        echo "[entrypoint] ERROR: runtime Anki not installed yet: ${REAL_ANKI}" >&2
-        echo "[entrypoint] run bootstrap mode first to initialize launcher/program files" >&2
-        exit 1
-    fi
+if [[ -x "${REAL_ANKI}" ]]; then
     echo "[entrypoint] using installed venv Anki: ${REAL_ANKI}"
     START_CMD="export DISPLAY='${DISPLAY}' XDG_RUNTIME_DIR='${XDG_RUNTIME_DIR}' HOME='${ANKI_HOME}' PYTHONFAULTHANDLER='${PYTHONFAULTHANDLER:-1}' RUST_BACKTRACE='${RUST_BACKTRACE:-1}' RUST_LOG='${RUST_LOG:-debug}'; exec '${REAL_ANKI}' --base '${ANKI_BASE}' --profile '${PROFILE}'"
-    (
-        run_as_anki "${START_CMD}"
-    ) > >(sed 's/^/[anki] /' | tee -a "${ANKI_LOG}") \
-      2> >(sed 's/^/[anki][stderr] /' | tee -a "${ANKI_LOG}" >&2) &
-    ANKI_PID=$!
+    ANKI_STATE="installed"
+else
+    echo "[entrypoint] using launcher bootstrap: ${LAUNCHER_ANKI}"
+    START_CMD="export DISPLAY='${DISPLAY}' XDG_RUNTIME_DIR='${XDG_RUNTIME_DIR}' HOME='${ANKI_HOME}' PYTHONFAULTHANDLER='${PYTHONFAULTHANDLER:-1}' RUST_BACKTRACE='${RUST_BACKTRACE:-1}' RUST_LOG='${RUST_LOG:-debug}'; exec '${LAUNCHER_ANKI}' --base '${ANKI_BASE}' --profile '${PROFILE}'"
+    ANKI_STATE="bootstrap"
+fi
+(
+    run_as_anki "${START_CMD}"
+) > >(sed 's/^/[anki] /' | tee -a "${ANKI_LOG}") \
+  2> >(sed 's/^/[anki][stderr] /' | tee -a "${ANKI_LOG}" >&2) &
+ANKI_PID=$!
 
-    if [[ "${WAIT_FOR_ANKICONNECT}" = "0" ]]; then
-        echo "[entrypoint] WAIT_FOR_ANKICONNECT=0; virtual desktop ready"
-        echo "[entrypoint] noVNC URL: http://localhost:${NOVNC_PORT}/vnc.html"
-        wait "${ANKI_PID}"
-        exit $?
-    fi
+echo "[entrypoint] desktop ready"
+echo "[entrypoint] state=${ANKI_STATE}"
+echo "[entrypoint] noVNC URL: http://localhost:${NOVNC_PORT}/vnc.html"
 
+if [[ "${WAIT_FOR_ANKICONNECT}" = "1" ]]; then
     echo "[entrypoint] waiting for AnkiConnect..."
     ANKICONNECT_URL="${ANKICONNECT_URL:-http://localhost:8765}"
     MAX_WAIT=120
     WAITED=0
     until curl -sf "${ANKICONNECT_URL}" -d '{"action":"version","version":6}' > /dev/null 2>&1; do
         if ! kill -0 "${ANKI_PID}" 2>/dev/null; then
-            echo "[entrypoint] ERROR: Anki process exited before AnkiConnect became ready" >&2
-            if [[ -f "${ANKI_LOG}" ]]; then
-                echo "[entrypoint] startup log tail:" >&2
-                tail -n 200 "${ANKI_LOG}" >&2 || true
-            fi
-            exit 1
+            echo "[entrypoint] WARN: Anki process exited before AnkiConnect became ready" >&2
+            break
         fi
         if [[ $WAITED -ge $MAX_WAIT ]]; then
-            echo "[entrypoint] ERROR: AnkiConnect did not become ready within ${MAX_WAIT}s" >&2
-            if [[ -f "${ANKI_LOG}" ]]; then
-                echo "[entrypoint] startup log tail:" >&2
-                tail -n 200 "${ANKI_LOG}" >&2 || true
-            fi
-            exit 1
+            echo "[entrypoint] WARN: AnkiConnect did not become ready within ${MAX_WAIT}s" >&2
+            break
         fi
         sleep 1
         WAITED=$((WAITED + 1))
     done
-    echo "[entrypoint] AnkiConnect ready (${WAITED}s)"
+    if curl -sf "${ANKICONNECT_URL}" -d '{"action":"version","version":6}' > /dev/null 2>&1; then
+        echo "[entrypoint] AnkiConnect ready (${WAITED}s)"
+    fi
+fi
+
+if [[ "${KEEP_DESKTOP_ALIVE}" = "1" ]]; then
+    wait "${ANKI_PID}" || true
+    echo "[entrypoint] anki process exited; keeping desktop alive"
+    while true; do sleep 3600; done
+else
     wait "${ANKI_PID}"
-    ;;
-  *)
-    echo "[entrypoint] ERROR: unsupported ANKI_MODE=${ANKI_MODE} (expected bootstrap|run)" >&2
-    exit 1
-    ;;
-esac
+fi

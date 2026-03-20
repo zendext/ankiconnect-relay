@@ -69,23 +69,16 @@ The Desktop container route is now validated far enough to confirm:
 - re-enable and validate AnkiConnect in the stabilized runtime path
 - implement the Go HTTP API service itself
 
-## Runtime modes
+## Runtime model
 
-The container now supports two explicit runtime modes via `ANKI_MODE`:
+The container now uses a single runtime model:
 
-- `bootstrap` — first-run / manual initialization mode
-  - starts VNC/noVNC desktop
-  - runs launcher when program files are not initialized yet
-  - keeps the desktop alive after the first-run process exits, so manual GUI work can continue
-- `run` — steady-state runtime mode
-  - requires `/home/anki/.local/share/AnkiProgramFiles/.venv/bin/anki` to already exist
-  - starts the installed Anki directly
-  - can optionally wait for AnkiConnect to become ready
+- always starts VNC/noVNC and the virtual desktop
+- starts launcher when the installed Anki runtime is not present yet
+- otherwise starts the installed Anki directly
+- keeps the desktop alive even if the current Anki process exits, so manual GUI intervention remains possible
 
-Recommended workflow:
-
-1. Run `ANKI_MODE=bootstrap` through noVNC and finish first-run GUI setup.
-2. After launcher/program files and profile are initialized, run `ANKI_MODE=run` for normal usage.
+This avoids splitting the GUI lifecycle into separate operational modes. The container is always started the same way, while higher-level orchestration can decide whether the runtime is ready for service.
 
 ## Runtime mounts
 
