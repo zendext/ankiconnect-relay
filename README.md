@@ -95,10 +95,7 @@ These endpoints are relay-specific and do not conflict with any AnkiConnect acti
 ```bash
 # Anki desktop container
 cd docker/anki
-docker build \
-  --build-arg HTTP_PROXY= \
-  --build-arg HTTPS_PROXY= \
-  -t ankiconnect-relay-anki:latest .
+docker build -t ankiconnect-relay-anki:latest .
 
 # Relay
 cd ../..
