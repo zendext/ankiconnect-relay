@@ -20,7 +20,6 @@
 - [x] Implement `POST /anki/deck-names`
 - [x] Validate bridge API reachable from within shared network namespace
 - [ ] Add config validation and startup diagnostics
-- [ ] Add Bearer token authentication middleware
 
 ## C. Bridge runtime state
 
@@ -31,7 +30,6 @@
 
 ## D. Bridge -> AnkiConnect API
 
-- [ ] Add generic pass-through action endpoint or selected read-only probes
 - [ ] `POST /v0/decks/ensure`
 - [ ] `POST /v0/notes/lookup`
 - [ ] `POST /v0/notes`
@@ -61,6 +59,6 @@
 - AnkiConnect reachable from bridge container ✓
 
 ### P1 — next
-- Bearer token auth middleware
-- Deck ensure and note upsert flow
+- Deck ensure
+- Note upsert
 - Better runtime state reporting
