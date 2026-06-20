@@ -7,8 +7,7 @@ DISPLAY="${DISPLAY:-:1}"
 XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-anki}"
 ANKI_HOME="/home/anki"
 ANKI_USER="anki"
-REAL_ANKI="${ANKI_HOME}/.local/share/AnkiProgramFiles/.venv/bin/anki"
-LAUNCHER_ANKI="/usr/local/bin/anki"
+ANKI_BIN="${ANKI_BIN:-/usr/local/bin/anki}"
 WAIT_FOR_ANKICONNECT="${WAIT_FOR_ANKICONNECT:-0}"
 KEEP_DESKTOP_ALIVE="${KEEP_DESKTOP_ALIVE:-1}"
 VNC_PORT="${VNC_PORT:-5901}"
@@ -63,18 +62,16 @@ echo "[entrypoint] starting noVNC on :${NOVNC_PORT} -> localhost:${VNC_PORT}"
 websockify --web=/usr/share/novnc/ ${NOVNC_PORT} 127.0.0.1:${VNC_PORT} > >(sed 's/^/[novnc] /') 2> >(sed 's/^/[novnc][stderr] /' >&2) &
 NOVNC_PID=$!
 
-# 2. Start Anki or launcher
+# 2. Start Anki
 ANKI_LOG="${ANKI_BASE}/anki-startup.log"
 run_as_anki "rm -f $(shell_quote "${ANKI_LOG}") && touch $(shell_quote "${ANKI_LOG}")"
-if [[ -x "${REAL_ANKI}" ]]; then
-    echo "[entrypoint] using installed venv Anki: ${REAL_ANKI}"
-    START_CMD="export DISPLAY='${DISPLAY}' XDG_RUNTIME_DIR='${XDG_RUNTIME_DIR}' HOME='${ANKI_HOME}' PYTHONFAULTHANDLER='${PYTHONFAULTHANDLER:-1}' RUST_BACKTRACE='${RUST_BACKTRACE:-1}' RUST_LOG='${RUST_LOG:-debug}'; exec '${REAL_ANKI}' --base '${ANKI_BASE}' --profile '${PROFILE}'"
-    ANKI_STATE="installed"
-else
-    echo "[entrypoint] using launcher bootstrap: ${LAUNCHER_ANKI}"
-    START_CMD="export DISPLAY='${DISPLAY}' XDG_RUNTIME_DIR='${XDG_RUNTIME_DIR}' HOME='${ANKI_HOME}' PYTHONFAULTHANDLER='${PYTHONFAULTHANDLER:-1}' RUST_BACKTRACE='${RUST_BACKTRACE:-1}' RUST_LOG='${RUST_LOG:-debug}'; exec '${LAUNCHER_ANKI}' --base '${ANKI_BASE}' --profile '${PROFILE}'"
-    ANKI_STATE="bootstrap"
+if [[ ! -x "${ANKI_BIN}" ]]; then
+    echo "[entrypoint] ERROR: Anki executable not found: ${ANKI_BIN}" >&2
+    exit 1
 fi
+echo "[entrypoint] using Anki: ${ANKI_BIN}"
+START_CMD="export DISPLAY='${DISPLAY}' XDG_RUNTIME_DIR='${XDG_RUNTIME_DIR}' HOME='${ANKI_HOME}' PYTHONFAULTHANDLER='${PYTHONFAULTHANDLER:-1}' RUST_BACKTRACE='${RUST_BACKTRACE:-1}' RUST_LOG='${RUST_LOG:-debug}'; exec '${ANKI_BIN}' --base '${ANKI_BASE}' --profile '${PROFILE}'"
+ANKI_STATE="installed"
 (
     run_as_anki "${START_CMD}"
 ) > >(sed 's/^/[anki] /' | tee -a "${ANKI_LOG}") \

@@ -26,14 +26,14 @@ jobs:
           set -euo pipefail
 
           RAW_TAG="${GITHUB_REF_NAME}"
-          if [[ ! "$RAW_TAG" =~ ^anki-([0-9]+\.[0-9]+\.[0-9]+)-build([0-9]+)$ ]]; then
+          if [[ ! "$RAW_TAG" =~ ^anki-([0-9]+[.][0-9]+([.][0-9]+)?)-build([0-9]+)$ ]]; then
             echo "Invalid tag format: $RAW_TAG" >&2
-            echo "Expected: anki-25.09.2-build1" >&2
+            echo "Expected: anki-26.05-build1 or anki-25.09.4-build1" >&2
             exit 1
           fi
 
           ANKI_VERSION="${BASH_REMATCH[1]}"
-          BUILD_NUMBER="${BASH_REMATCH[2]}"
+          BUILD_NUMBER="${BASH_REMATCH[3]}"
           ANKI_SERIES="$(cut -d. -f1,2 <<<"$ANKI_VERSION")"
           VERSIONED_TAG="${ANKI_VERSION}-build${BUILD_NUMBER}"
 
@@ -78,7 +78,7 @@ jobs:
           tags: |
             type=raw,value=${{ steps.meta.outputs.versioned_tag }}
             type=raw,value=${{ steps.meta.outputs.anki_version }}
-            type=raw,value=${{ steps.meta.outputs.anki_series }}
+            type=raw,value=${{ steps.meta.outputs.anki_series }},enable=${{ steps.meta.outputs.anki_series != steps.meta.outputs.anki_version }}
 
       - name: Build and push image
         uses: docker/build-push-action@v6

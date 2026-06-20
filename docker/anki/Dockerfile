@@ -3,9 +3,10 @@
 FROM debian:bookworm-slim
 
 
-ARG ANKI_VERSION=25.09.2
-ARG ANKI_SERIES=25.09
-ARG ANKI_PKG=anki-launcher-${ANKI_SERIES}-linux
+ARG ANKI_VERSION=26.05
+ARG ANKI_SERIES=26.05
+ARG ANKI_ARCH=x86_64
+ARG ANKI_PKG=anki-${ANKI_VERSION}-linux-${ANKI_ARCH}
 ARG ANKI_UID=1000
 ARG ANKI_GID=1000
 ARG TZ=UTC
@@ -62,10 +63,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxcb-xkb1 \
     libxkbcommon-x11-0 \
     libdbus-1-3 \
+    libfreetype6 \
     libfontconfig1 \
     libnss3 \
     libnspr4 \
     libxcomposite1 \
+    libxcursor1 \
     libxdamage1 \
     libxfixes3 \
     libxrandr2 \
@@ -81,6 +84,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxcb-glx0 \
     libgl1-mesa-dri \
     mesa-utils \
+    libxkbcommon0 \
     libasound2 \
     libpulse0 \
     libatomic1 \
@@ -98,10 +102,10 @@ RUN groupadd -g ${ANKI_GID} anki \
 
 RUN wget -q "https://github.com/ankitects/anki/releases/download/${ANKI_SERIES}/${ANKI_PKG}.tar.zst" \
     && zstd -d "${ANKI_PKG}.tar.zst" --stdout | tar -xf - \
-    && cd "${ANKI_PKG}" \
+    && cd anki-linux \
     && ln -sf /bin/true /usr/local/bin/xdg-mime \
     && ./install.sh \
-    && cd .. && rm -rf "${ANKI_PKG}" "${ANKI_PKG}.tar.zst"
+    && cd .. && rm -rf anki-linux "${ANKI_PKG}.tar.zst"
 
 RUN chown -R ${ANKI_UID}:${ANKI_GID} /home/anki/.local
 
