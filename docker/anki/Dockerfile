@@ -3,8 +3,8 @@
 FROM debian:bookworm-slim
 
 
-ARG ANKI_VERSION=26.05
-ARG ANKI_SERIES=26.05
+ARG ANKI_VERSION=26.09.4
+ARG ANKI_SERIES=26.09
 ARG ANKI_ARCH=x86_64
 ARG ANKI_PKG=anki-${ANKI_VERSION}-linux-${ANKI_ARCH}
 ARG ANKI_UID=1000
@@ -100,12 +100,13 @@ RUN groupadd -g ${ANKI_GID} anki \
     && mkdir -p /anki-data /home/anki/.local/share/Anki2 /home/anki/.cache/uv /home/anki/.local/share/AnkiProgramFiles /tmp/runtime-anki \
     && chown -R ${ANKI_UID}:${ANKI_GID} /home/anki /anki-data /tmp/runtime-anki
 
-RUN wget -q "https://github.com/ankitects/anki/releases/download/${ANKI_SERIES}/${ANKI_PKG}.tar.zst" \
-    && zstd -d "${ANKI_PKG}.tar.zst" --stdout | tar -xf - \
-    && cd anki-linux \
+RUN wget -qO "/tmp/${ANKI_PKG}.tar.zst" "https://github.com/ankitects/anki/releases/download/${ANKI_VERSION}/${ANKI_PKG}.tar.zst" \
+    && mkdir -p /tmp/anki-src \
+    && zstd -d "/tmp/${ANKI_PKG}.tar.zst" --stdout | tar -xf - -C /tmp/anki-src --strip-components=1 \
+    && cd /tmp/anki-src \
     && ln -sf /bin/true /usr/local/bin/xdg-mime \
     && ./install.sh \
-    && cd .. && rm -rf anki-linux "${ANKI_PKG}.tar.zst"
+    && cd / && rm -rf /tmp/anki-src "/tmp/${ANKI_PKG}.tar.zst"
 
 RUN chown -R ${ANKI_UID}:${ANKI_GID} /home/anki/.local
 
